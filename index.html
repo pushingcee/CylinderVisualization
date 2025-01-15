@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Synced Rectangle & Cylinder (Global OrbitControls)</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #slider {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 200px;
+    }
+  </style>
+</head>
+<body>
+  <input id="slider" type="range" min="0" max="360" value="0"/>
+
+  <!-- Three.js (older version) + OrbitControls that attach to THREE -->
+  <script src="https://unpkg.com/three@0.131.3/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.131.3/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    // Scene
+    const scene = new THREE.Scene();
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(3, 2, 5);
+
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Orbit controls (global)
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+    // AxesHelper
+    const axes = new THREE.AxesHelper(3);
+    scene.add(axes);
+
+    // Lighting
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(5, 5, 5);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+    // --- 1) Rectangle setup ---
+    // We want a rectangle of width=1 (the "radius"), rotating around x=0.
+    // By default, PlaneGeometry(1,1) is centered at (0,0). We shift it so its left edge is at x=0.
+    const rectGeo = new THREE.PlaneGeometry(1, 1);
+    rectGeo.translate(0.5, 0, 0); 
+    // Make it DoubleSide so we can see it from behind
+    const rectMat = new THREE.MeshPhongMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+    const rectangle = new THREE.Mesh(rectGeo, rectMat);
+	rectGeo.rotateY(-Math.PI / 2);
+
+
+    // Put rectangle in a pivot group so it can rotate around x=0
+    const pivot = new THREE.Group();
+    pivot.add(rectangle);
+    scene.add(pivot);
+
+    // By default, the plane is in the XY-plane facing +Z. That’s fine.
+
+    // --- 2) Cylinder setup ---
+    // We'll keep the cylinder in the scene (NOT attached to pivot).
+    // That way it doesn't physically rotate. Instead, we'll generate partial revolve geometry.
+    const cylMat = new THREE.MeshPhongMaterial({ color: 0x0000ff, side: THREE.DoubleSide });
+    let cylinder = new THREE.Mesh(new THREE.BufferGeometry(), cylMat);
+    scene.add(cylinder);
+
+    // We want the cylinder’s axis also at x=0, same as the rectangle pivot.
+    // CylinderGeometry by default is centered on the Y-axis. For revolve about the Y-axis,
+    // the radius extends along X and Z. That’s exactly what we want.
+
+    // --- 3) Slider logic ---
+    const slider = document.getElementById('slider');
+    slider.addEventListener('input', () => {
+      const angleDeg = Number(slider.value);
+      const angleRad = THREE.MathUtils.degToRad(angleDeg);
+
+      // A) Physically rotate the rectangle
+      //    so its "right edge" is at angleRad around x=0
+      pivot.rotation.y = angleRad;
+
+      // B) Rebuild the partial cylinder geometry from 0..angleRad
+      cylinder.geometry.dispose();
+      const geo = new THREE.CylinderGeometry(
+        /* radiusTop   = */ 1,
+        /* radiusBottom= */ 1,
+        /* height      = */ 1,
+        /* radialSegs  = */ 32,
+        /* heightSegs  = */ 1,
+        /* openEnded   = */ false,
+        /* thetaStart  = */ 0,
+        /* thetaLength = */ angleRad  // partial revolve
+      );
+      // We do NOT translate the cylinder geometry. 
+      // So its axis is exactly at x=0, matching pivot's axis.
+
+      cylinder.geometry = geo;
+    });
+
+    // Initialize
+    slider.dispatchEvent(new Event('input'));
+
+    // Render
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
+ 
