@@ -5,16 +5,45 @@
   <title>Synced Rectangle & Cylinder (Global OrbitControls)</title>
   <style>
     body { margin: 0; overflow: hidden; }
-    #slider {
+    #controls {
       position: absolute;
       top: 10px;
       left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 15px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+      color: #333;
+    }
+    select, #slider {
       width: 200px;
+      padding: 5px;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    #slider {
+      width: 100%;
     }
   </style>
 </head>
 <body>
-  <input id="slider" type="range" min="0" max="360" value="0"/>
+  <div id="controls">
+    <label for="shapeSelect">Select Shape:</label>
+    <select id="shapeSelect">
+      <option value="square">Square (1x1)</option>
+      <option value="rectangle">Rectangle (1x0.5)</option>
+      <option value="triangle">Right Triangle (1x0.7)</option>
+    </select>
+
+    <label for="slider">Rotation Angle (degrees):</label>
+    <input id="slider" type="range" min="0" max="360" value="0"/>
+    <span id="angleDisplay">0°</span>
+  </div>
 
   <!-- Three.js (older version) + OrbitControls that attach to THREE -->
   <script src="https://unpkg.com/three@0.131.3/build/three.min.js"></script>
@@ -26,7 +55,7 @@
 
     // Camera
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    camera.position.set(3, 2, 5);
+    camera.position.set(1.5, 1, 2);
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -46,65 +75,127 @@
     scene.add(light);
     scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 
-    // --- 1) Rectangle setup ---
-    // We want a rectangle of width=1 (the "radius"), rotating around x=0.
-    // By default, PlaneGeometry(1,1) is centered at (0,0). We shift it so its left edge is at x=0.
-    const rectGeo = new THREE.PlaneGeometry(1, 1);
-    rectGeo.translate(0.5, 0, 0); 
-    // Make it DoubleSide so we can see it from behind
-    const rectMat = new THREE.MeshPhongMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
-    const rectangle = new THREE.Mesh(rectGeo, rectMat);
-	rectGeo.rotateY(-Math.PI / 2);
+    // --- Shape definitions ---
+    const shapeConfigs = {
+      square: { width: 1, height: 1, description: "Square" },
+      rectangle: { width: 1, height: 0.5, description: "Rectangle" },
+      triangle: { width: 1, height: 0.7, description: "Right Triangle" }
+    };
 
+    let currentShape = 'square';
+    const shapeSelect = document.getElementById('shapeSelect');
+    const slider = document.getElementById('slider');
+    const angleDisplay = document.getElementById('angleDisplay');
 
-    // Put rectangle in a pivot group so it can rotate around x=0
+    // --- Helper: Create geometry for selected shape ---
+    function createShapeGeometry(shapeType) {
+      const config = shapeConfigs[shapeType];
+      let geo;
+
+      if (shapeType === 'triangle') {
+        // Create right triangle using BufferGeometry
+        // Triangle with vertices at (0,0), (width,0), (0,height)
+        const vertices = new Float32Array([
+          0, 0, 0,           // vertex 0: rotation axis point
+          config.width, 0, 0, // vertex 1: right angle point
+          0, config.height, 0 // vertex 2: opposite cathetus
+        ]);
+        const indices = new Uint16Array([0, 1, 2]);
+
+        geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        geo.setIndex(new THREE.BufferAttribute(indices, 1));
+        geo.computeVertexNormals();
+      } else {
+        // Rectangle or Square: PlaneGeometry, shifted so left edge is at x=0
+        geo = new THREE.PlaneGeometry(config.width, config.height);
+        geo.translate(config.width / 2, 0, 0);
+      }
+
+      geo.rotateY(-Math.PI / 2);
+      return geo;
+    }
+
+    // --- 1) Shape mesh setup ---
+    const shapeMat = new THREE.MeshPhongMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+    let shape = new THREE.Mesh(createShapeGeometry('square'), shapeMat);
+
+    // Put shape in a pivot group so it can rotate around x=0
     const pivot = new THREE.Group();
-    pivot.add(rectangle);
+    pivot.add(shape);
     scene.add(pivot);
 
-    // By default, the plane is in the XY-plane facing +Z. That’s fine.
-
     // --- 2) Cylinder setup ---
-    // We'll keep the cylinder in the scene (NOT attached to pivot).
-    // That way it doesn't physically rotate. Instead, we'll generate partial revolve geometry.
     const cylMat = new THREE.MeshPhongMaterial({ color: 0x0000ff, side: THREE.DoubleSide });
     let cylinder = new THREE.Mesh(new THREE.BufferGeometry(), cylMat);
     scene.add(cylinder);
 
-    // We want the cylinder’s axis also at x=0, same as the rectangle pivot.
-    // CylinderGeometry by default is centered on the Y-axis. For revolve about the Y-axis,
-    // the radius extends along X and Z. That’s exactly what we want.
-
-    // --- 3) Slider logic ---
-    const slider = document.getElementById('slider');
-    slider.addEventListener('input', () => {
+    // --- 3) Update function ---
+    function updateVisualization() {
       const angleDeg = Number(slider.value);
       const angleRad = THREE.MathUtils.degToRad(angleDeg);
+      const config = shapeConfigs[currentShape];
 
-      // A) Physically rotate the rectangle
-      //    so its "right edge" is at angleRad around x=0
+      // Update angle display
+      angleDisplay.textContent = angleDeg + '°';
+
+      // A) Physically rotate the shape
       pivot.rotation.y = angleRad;
 
-      // B) Rebuild the partial cylinder geometry from 0..angleRad
+      // B) Rebuild the partial cylinder/cone geometry
       cylinder.geometry.dispose();
-      const geo = new THREE.CylinderGeometry(
-        /* radiusTop   = */ 1,
-        /* radiusBottom= */ 1,
-        /* height      = */ 1,
-        /* radialSegs  = */ 32,
-        /* heightSegs  = */ 1,
-        /* openEnded   = */ false,
-        /* thetaStart  = */ 0,
-        /* thetaLength = */ angleRad  // partial revolve
-      );
-      // We do NOT translate the cylinder geometry. 
-      // So its axis is exactly at x=0, matching pivot's axis.
 
-      cylinder.geometry = geo;
+      if (currentShape === 'triangle') {
+        // For triangle: create a cone with height matching the triangle's cathetus
+        // and radius matching the other cathetus
+        const geo = new THREE.ConeGeometry(
+          /* radius   = */ config.width,
+          /* height   = */ config.height,
+          /* segments = */ 32,
+          /* heightSegs = */ 1,
+          /* openEnded = */ false,
+          /* thetaStart = */ 0,
+          /* thetaLength = */ angleRad
+        );
+        // Position cone so its base is centered and rotates around the origin correctly
+        geo.translate(0, config.height / 2, 0);
+        cylinder.geometry = geo;
+      } else {
+        // For rectangle/square: use CylinderGeometry
+        const geo = new THREE.CylinderGeometry(
+          /* radiusTop   = */ config.width,
+          /* radiusBottom= */ config.width,
+          /* height      = */ config.height,
+          /* radialSegs  = */ 32,
+          /* heightSegs  = */ 1,
+          /* openEnded   = */ false,
+          /* thetaStart  = */ 0,
+          /* thetaLength = */ angleRad
+        );
+        cylinder.geometry = geo;
+      }
+    }
+
+    // --- 4) Event listeners ---
+    shapeSelect.addEventListener('change', () => {
+      currentShape = shapeSelect.value;
+
+      // Replace the shape mesh
+      pivot.remove(shape);
+      shape.geometry.dispose();
+      shape = new THREE.Mesh(createShapeGeometry(currentShape), shapeMat);
+      pivot.add(shape);
+
+      // Update visualization
+      updateVisualization();
+    });
+
+    slider.addEventListener('input', () => {
+      updateVisualization();
     });
 
     // Initialize
-    slider.dispatchEvent(new Event('input'));
+    updateVisualization();
 
     // Render
     function animate() {
